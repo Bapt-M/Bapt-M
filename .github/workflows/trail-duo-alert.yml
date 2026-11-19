@@ -1,3 +1,4 @@
+# Vérifie les places Duo du Trail des Crêtes et alerte sur Telegram (voir trail-alert/README.md)
 name: Alerte places Duo Trail des Crêtes
 
 on:
