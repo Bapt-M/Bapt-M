@@ -1,10 +1,10 @@
 # Alerte Telegram – places Duo du Trail des Crêtes
 
-Toutes les 15 minutes, GitHub Actions ouvre la [page d'inscription](https://forms.registration4all.com/EventRegistration/Register_Sport_Event.aspx?EventID=233725&RORG=LSCAL),
-lit le nombre de places restantes en **Duo** et poste un message dans le groupe Telegram :
+Toutes les 5 minutes, GitHub Actions ouvre la [page d'inscription](https://forms.registration4all.com/EventRegistration/Register_Sport_Event.aspx?EventID=233725&RORG=LSCAL),
+lit le nombre de **duos** (équipes) restants au **Trail des Crêtes 65 km en Duo** et poste un message dans le groupe Telegram :
 
-- quand il reste **moins de 30** places,
-- puis à nouveau sous 20, 10 et 5 places, et quand c'est complet (pas de spam entre deux paliers).
+- quand il reste **moins de 30** duos,
+- puis à nouveau sous 20, 10 et 5 duos, et quand c'est complet (pas de spam entre deux paliers).
 
 ## Mise en place (10 min)
 
@@ -16,11 +16,11 @@ lit le nombre de places restantes en **Duo** et poste un message dans le groupe 
    - `TELEGRAM_BOT_TOKEN` = le token
    - `TELEGRAM_CHAT_ID` = l'id du groupe
 5. **Tester** : onglet *Actions* → *Alerte places Duo Trail des Crêtes* → *Run workflow*.
-   Le journal affiche « Places Duo restantes : N ».
+   Le journal affiche « Duos restants : N ».
 
 ## Commande /places
 
-Envoie `/places` au bot pour connaître le nombre de places Duo restantes.
+Envoie `/places` au bot pour connaître le nombre de duos restants.
 La réponse arrive à la vérification suivante (toutes les 5 min en théorie ; GitHub retarde souvent
 les tâches planifiées, compter 5 à 15 min).
 
@@ -31,7 +31,8 @@ Pour que la commande apparaisse dans le menu du bot : `@BotFather` → `/setcomm
 
 Dans `.github/workflows/trail-duo-alert.yml` :
 - `THRESHOLD` : seuil d'alerte (30 par défaut)
-- `RACE_KEYWORD` : mot qui repère la course sur la page (`duo`)
+- `RACE_WORDS` : mots qui repèrent la course sur la page (`trail des crêtes,duo`)
+- `THRESHOLD` compte des **duos** (équipes), pas des coureurs
 - `cron` : fréquence de vérification
 
 Si la page change de présentation et que le nombre est introuvable, le bot envoie un

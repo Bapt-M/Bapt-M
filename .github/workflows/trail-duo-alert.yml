@@ -39,7 +39,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           THRESHOLD: "30"
-          RACE_KEYWORD: "duo"
+          RACE_WORDS: "trail des crêtes,duo"
         run: python trail-alert/check_duo.py
 
       - name: Sauvegarder l'état

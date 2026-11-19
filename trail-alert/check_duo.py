@@ -5,7 +5,7 @@ Variables d'environnement :
   TELEGRAM_BOT_TOKEN  token du bot (fourni par @BotFather)          [obligatoire]
   TELEGRAM_CHAT_ID    id du groupe (ex. -1001234567890)              [obligatoire]
   EVENT_URL           page d'inscription (valeur par défaut ci-dessous)
-  RACE_KEYWORD        mot qui identifie la course (défaut : "duo")
+  RACE_WORDS          mots du nom de la course (défaut : "trail des crêtes,duo")
   THRESHOLD           seuil d'alerte (défaut : 30)
   STATE_FILE          fichier qui mémorise les alertes déjà envoyées
   DRY_RUN=1           affiche le message au lieu de l'envoyer
@@ -22,7 +22,12 @@ EVENT_URL = os.environ.get(
     "https://forms.registration4all.com/EventRegistration/Register_Sport_Event.aspx"
     "?EventID=233725&RORG=LSCAL",
 )
-RACE_KEYWORD = os.environ.get("RACE_KEYWORD", "duo").lower()
+# Mots qui doivent tous figurer dans le nom de la course (séparés par des virgules)
+RACE_WORDS = [
+    w.strip().lower()
+    for w in os.environ.get("RACE_WORDS", "trail des crêtes,duo").split(",")
+    if w.strip()
+]
 THRESHOLD = int(os.environ.get("THRESHOLD", "30"))
 STATE_FILE = os.environ.get("STATE_FILE", "state/duo_state.json")
 DRY_RUN = os.environ.get("DRY_RUN") == "1"
@@ -53,19 +58,42 @@ def fetch_text() -> str:
 
 
 def find_remaining(text: str):
-    """Renvoie (places restantes ou None, extrait de la page)."""
+    """Renvoie (nombre de duos restants ou None, extrait de la page).
+
+    Sur la page, chaque course ressemble à :
+        Le Trail des Crêtes 65km en DUO
+        TRAIL, COURSE NATURE - 65 km -
+        7:00
+        né(e)s le 02/07/2007 et avant
+        PLACES DISPONIBLES: 318 = 159 équipes
+        S'INSCRIRE
+    """
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     for i, line in enumerate(lines):
-        if RACE_KEYWORD not in line.lower():
+        low = line.lower()
+        if not all(w in low for w in RACE_WORDS):
             continue
-        # La course et son compteur sont souvent sur la même ligne ou juste en dessous
-        window = " ".join(lines[i : i + 4])
+        # Bloc de la course : jusqu'au bouton S'INSCRIRE (ou 10 lignes max)
+        block = []
+        for l in lines[i : i + 10]:
+            block.append(l)
+            if "inscrire" in l.lower():
+                break
+        window = " | ".join(block)
+        m = re.search(
+            r"places?\s+disponibles?\s*:\s*(\d+)(?:\s*=\s*(\d+)\s*[ée]quipes?)?",
+            window,
+            re.IGNORECASE,
+        )
+        if m:
+            places, teams = int(m.group(1)), m.group(2)
+            return (int(teams) if teams else places // 2), window
+        if re.search(FULL_PATTERN, window, re.IGNORECASE):
+            return 0, window
         for pat in NUM_PATTERNS:
             m = re.search(pat, window, re.IGNORECASE)
             if m:
-                return int(m.group(1)), window
-        if re.search(FULL_PATTERN, window, re.IGNORECASE):
-            return 0, window
+                return int(m.group(1)) // 2, window
     return None, None
 
 
@@ -108,7 +136,7 @@ def places_message(remaining) -> str:
         return f"🤷 Je ne trouve pas le nombre de places Duo sur la page.\n{EVENT_URL}"
     if remaining == 0:
         return f"🚫 Trail des Crêtes : le Duo est COMPLET.\n{EVENT_URL}"
-    return f"🏃 Trail des Crêtes : il reste {remaining} places en Duo.\nInscription : {EVENT_URL}"
+    return f"🏃 Trail des Crêtes : il reste {remaining} duos (équipes) en 65 km Duo.\nInscription : {EVENT_URL}"
 
 
 def answer_commands(remaining, state: dict) -> None:
@@ -153,7 +181,7 @@ def main() -> int:
             save_state(state)
         return 1
 
-    print(f"Places Duo restantes : {remaining}  (extrait : {snippet!r})")
+    print(f"Duos restants : {remaining}  (extrait : {snippet!r})")
     state["parse_error_sent"] = False
     last_step = state.get("last_step")  # dernier palier déjà annoncé
 
@@ -166,7 +194,7 @@ def main() -> int:
             msg = places_message(0)
         else:
             msg = (
-                f"🏃‍♂️🏃‍♀️ Trail des Crêtes : plus que {remaining} places en Duo !\n"
+                f"🏃‍♂️🏃‍♀️ Trail des Crêtes : plus que {remaining} duos dispo en 65 km Duo !\n"
                 f"Inscription : {EVENT_URL}"
             )
         send_telegram(msg)
