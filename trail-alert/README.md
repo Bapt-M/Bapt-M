@@ -18,6 +18,15 @@ lit le nombre de places restantes en **Duo** et poste un message dans le groupe 
 5. **Tester** : onglet *Actions* → *Alerte places Duo Trail des Crêtes* → *Run workflow*.
    Le journal affiche « Places Duo restantes : N ».
 
+## Commande /places
+
+Envoie `/places` au bot pour connaître le nombre de places Duo restantes.
+La réponse arrive à la vérification suivante (toutes les 5 min en théorie ; GitHub retarde souvent
+les tâches planifiées, compter 5 à 15 min).
+
+Pour que la commande apparaisse dans le menu du bot : `@BotFather` → `/setcommands` → choisir le bot
+→ envoyer `places - Nombre de places Duo restantes`.
+
 ## Réglages
 
 Dans `.github/workflows/trail-duo-alert.yml` :

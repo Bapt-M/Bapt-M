@@ -83,24 +83,64 @@ def save_state(state: dict) -> None:
         json.dump(state, f)
 
 
-def send_telegram(message: str) -> None:
+def telegram_api(method: str, params: dict) -> dict:
+    token = os.environ["TELEGRAM_BOT_TOKEN"]
+    data = urllib.parse.urlencode(params).encode()
+    url = f"https://api.telegram.org/bot{token}/{method}"
+    with urllib.request.urlopen(url, data=data, timeout=30) as r:
+        return json.load(r)
+
+
+def send_telegram(message: str, chat_id=None) -> None:
     if DRY_RUN:
         print("[DRY_RUN] " + message)
         return
-    token = os.environ["TELEGRAM_BOT_TOKEN"]
-    chat_id = os.environ["TELEGRAM_CHAT_ID"]
-    data = urllib.parse.urlencode(
-        {"chat_id": chat_id, "text": message, "disable_web_page_preview": "true"}
-    ).encode()
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    with urllib.request.urlopen(url, data=data, timeout=30) as r:
-        print("Telegram :", r.status)
+    chat_id = chat_id or os.environ["TELEGRAM_CHAT_ID"]
+    res = telegram_api(
+        "sendMessage",
+        {"chat_id": chat_id, "text": message, "disable_web_page_preview": "true"},
+    )
+    print("Telegram :", "ok" if res.get("ok") else res)
+
+
+def places_message(remaining) -> str:
+    if remaining is None:
+        return f"🤷 Je ne trouve pas le nombre de places Duo sur la page.\n{EVENT_URL}"
+    if remaining == 0:
+        return f"🚫 Trail des Crêtes : le Duo est COMPLET.\n{EVENT_URL}"
+    return f"🏃 Trail des Crêtes : il reste {remaining} places en Duo.\nInscription : {EVENT_URL}"
+
+
+def answer_commands(remaining, state: dict) -> None:
+    """Répond aux commandes /places reçues depuis la dernière vérification."""
+    if DRY_RUN:
+        return
+    params = {"timeout": 0, "allowed_updates": '["message"]'}
+    if state.get("update_offset"):
+        params["offset"] = state["update_offset"]
+    try:
+        updates = telegram_api("getUpdates", params).get("result", [])
+    except Exception as e:  # une panne Telegram ne doit pas bloquer l'alerte
+        print("getUpdates en échec :", e)
+        return
+    answered = set()
+    for u in updates:
+        state["update_offset"] = u["update_id"] + 1
+        msg = u.get("message") or {}
+        text = (msg.get("text") or "").strip().lower()
+        chat_id = (msg.get("chat") or {}).get("id")
+        # Accepte /places et /places@NomDuBot (utile dans un groupe)
+        if chat_id and text.split("@")[0].split()[0:1] == ["/places"] and chat_id not in answered:
+            send_telegram(places_message(remaining), chat_id=chat_id)
+            answered.add(chat_id)
 
 
 def main() -> int:
     state = load_state()
     text = fetch_text()
     remaining, snippet = find_remaining(text)
+    answer_commands(remaining, state)
+    save_state(state)
 
     if remaining is None:
         print("Compteur Duo introuvable. Début du texte de la page :\n" + text[:3000])
@@ -123,7 +163,7 @@ def main() -> int:
 
     if step is not None and (last_step is None or step < last_step):
         if remaining == 0:
-            msg = f"🚫 Trail des Crêtes : le Duo est COMPLET.\n{EVENT_URL}"
+            msg = places_message(0)
         else:
             msg = (
                 f"🏃‍♂️🏃‍♀️ Trail des Crêtes : plus que {remaining} places en Duo !\n"
