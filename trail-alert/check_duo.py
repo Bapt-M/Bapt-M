@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Surveille les places restantes en Duo du Trail des Crêtes et alerte un groupe Telegram.
+
+Variables d'environnement :
+  TELEGRAM_BOT_TOKEN  token du bot (fourni par @BotFather)          [obligatoire]
+  TELEGRAM_CHAT_ID    id du groupe (ex. -1001234567890)              [obligatoire]
+  EVENT_URL           page d'inscription (valeur par défaut ci-dessous)
+  RACE_KEYWORD        mot qui identifie la course (défaut : "duo")
+  THRESHOLD           seuil d'alerte (défaut : 30)
+  STATE_FILE          fichier qui mémorise les alertes déjà envoyées
+  DRY_RUN=1           affiche le message au lieu de l'envoyer
+"""
+import json
+import os
+import re
+import sys
+import urllib.parse
+import urllib.request
+
+EVENT_URL = os.environ.get(
+    "EVENT_URL",
+    "https://forms.registration4all.com/EventRegistration/Register_Sport_Event.aspx"
+    "?EventID=233725&RORG=LSCAL",
+)
+RACE_KEYWORD = os.environ.get("RACE_KEYWORD", "duo").lower()
+THRESHOLD = int(os.environ.get("THRESHOLD", "30"))
+STATE_FILE = os.environ.get("STATE_FILE", "state/duo_state.json")
+DRY_RUN = os.environ.get("DRY_RUN") == "1"
+
+# Paliers : une alerte au passage sous 30, puis sous 20, 10, 5, et quand c'est complet.
+STEPS = sorted({THRESHOLD, 20, 10, 5, 0}, reverse=True)
+
+# Formulations courantes autour du nombre de places
+NUM_PATTERNS = [
+    r"(\d+)\s*(?:places?|dossards?|spots?|inscriptions?)\s*(?:restantes?|disponibles?|libres?|left|remaining|available)",
+    r"(?:restantes?|disponibles?|remaining|available|left)\s*[:\-]?\s*(\d+)",
+    r"(?:places?|spots?)\s*(?:restantes?|disponibles?)\s*[:\-]?\s*(\d+)",
+]
+FULL_PATTERN = r"\b(complet|sold\s*out|full|liste d'attente|waiting list)\b"
+
+
+def fetch_text() -> str:
+    """Rend la page avec un vrai navigateur (le site peut charger les places en JavaScript)."""
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(locale="fr-FR")
+        page.goto(EVENT_URL, wait_until="networkidle", timeout=60_000)
+        text = page.inner_text("body")
+        browser.close()
+    return text
+
+
+def find_remaining(text: str):
+    """Renvoie (places restantes ou None, extrait de la page)."""
+    lines = [l.strip() for l in text.splitlines() if l.strip()]
+    for i, line in enumerate(lines):
+        if RACE_KEYWORD not in line.lower():
+            continue
+        # La course et son compteur sont souvent sur la même ligne ou juste en dessous
+        window = " ".join(lines[i : i + 4])
+        for pat in NUM_PATTERNS:
+            m = re.search(pat, window, re.IGNORECASE)
+            if m:
+                return int(m.group(1)), window
+        if re.search(FULL_PATTERN, window, re.IGNORECASE):
+            return 0, window
+    return None, None
+
+
+def load_state() -> dict:
+    try:
+        with open(STATE_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(state: dict) -> None:
+    os.makedirs(os.path.dirname(STATE_FILE) or ".", exist_ok=True)
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f)
+
+
+def send_telegram(message: str) -> None:
+    if DRY_RUN:
+        print("[DRY_RUN] " + message)
+        return
+    token = os.environ["TELEGRAM_BOT_TOKEN"]
+    chat_id = os.environ["TELEGRAM_CHAT_ID"]
+    data = urllib.parse.urlencode(
+        {"chat_id": chat_id, "text": message, "disable_web_page_preview": "true"}
+    ).encode()
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    with urllib.request.urlopen(url, data=data, timeout=30) as r:
+        print("Telegram :", r.status)
+
+
+def main() -> int:
+    state = load_state()
+    text = fetch_text()
+    remaining, snippet = find_remaining(text)
+
+    if remaining is None:
+        print("Compteur Duo introuvable. Début du texte de la page :\n" + text[:3000])
+        if not state.get("parse_error_sent"):
+            send_telegram(
+                "⚠️ Alerte Trail des Crêtes : je ne trouve plus le nombre de places Duo "
+                f"sur la page. À vérifier à la main : {EVENT_URL}"
+            )
+            state["parse_error_sent"] = True
+            save_state(state)
+        return 1
+
+    print(f"Places Duo restantes : {remaining}  (extrait : {snippet!r})")
+    state["parse_error_sent"] = False
+    last_step = state.get("last_step")  # dernier palier déjà annoncé
+
+    # Palier le plus bas atteint
+    reached = [s for s in STEPS if remaining <= s and (s < THRESHOLD or remaining < THRESHOLD)]
+    step = min(reached) if reached else None
+
+    if step is not None and (last_step is None or step < last_step):
+        if remaining == 0:
+            msg = f"🚫 Trail des Crêtes : le Duo est COMPLET.\n{EVENT_URL}"
+        else:
+            msg = (
+                f"🏃‍♂️🏃‍♀️ Trail des Crêtes : plus que {remaining} places en Duo !\n"
+                f"Inscription : {EVENT_URL}"
+            )
+        send_telegram(msg)
+        state["last_step"] = step
+    elif step is None and last_step is not None:
+        # Des places ont été libérées : on repart de zéro
+        state["last_step"] = None
+
+    state["last_remaining"] = remaining
+    save_state(state)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

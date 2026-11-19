@@ -1,0 +1,49 @@
+name: Alerte places Duo Trail des Crêtes
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # toutes les 15 minutes
+  workflow_dispatch:          # bouton "Run workflow" pour tester à la main
+
+concurrency:
+  group: trail-duo-alert
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer Playwright
+        run: |
+          pip install playwright==1.47.0
+          python -m playwright install --with-deps chromium
+
+      # Mémorise les paliers déjà annoncés pour ne pas spammer le groupe
+      - name: Restaurer l'état
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: duo-state-${{ github.run_id }}
+          restore-keys: duo-state-
+
+      - name: Vérifier les places
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          THRESHOLD: "30"
+          RACE_KEYWORD: "duo"
+        run: python trail-alert/check_duo.py
+
+      - name: Sauvegarder l'état
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: duo-state-${{ github.run_id }}
