@@ -1,21 +1,16 @@
-# Test temporaire : structure brute de la page
+# Test temporaire : le code Cloudflare lit-il la page brute ?
 name: Debug page brute
 on: workflow_dispatch
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - run: |
           curl -sSL -A "Mozilla/5.0" -o /tmp/page.html \
             "https://forms.registration4all.com/EventRegistration/Register_Sport_Event.aspx?EventID=233725&RORG=LSCAL"
-          python3 - <<'PY'
-          import re
-          s=open('/tmp/page.html',encoding='utf-8',errors='replace').read()
-          i=s.find('Le Trail des Crêtes 65km en DUO')
-          seg=re.sub(r'\s+',' ',s[i:i+12000])
-          j=seg.lower().find('inscrire')
-          print(seg[:j+300])
-          print('=== ids _6 ===')
-          for m in re.finditer(r'id="([^"]*_6)"[^>]*>([^<]{0,80})', s):
-              print(m.group(1), '=>', m.group(2).strip())
-          PY
+          cp cloudflare-bot/src/index.js /tmp/bot.mjs
+          node --input-type=module -e '
+            import { findRemaining } from "/tmp/bot.mjs";
+            import { readFileSync } from "fs";
+            console.log("RESULTAT", JSON.stringify(findRemaining(readFileSync("/tmp/page.html","utf8"))));'
