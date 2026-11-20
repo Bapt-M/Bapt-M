@@ -1,10 +1,10 @@
 # Vérifie les places Duo du Trail des Crêtes et alerte sur Telegram (voir trail-alert/README.md)
 name: Alerte places Duo Trail des Crêtes
 
+# Ancienne version : remplacée par le bot Cloudflare (cloudflare-bot/).
+# Plus de lancement planifié, seulement à la main en secours.
 on:
-  schedule:
-    - cron: "*/5 * * * *"    # toutes les 5 minutes (le minimum de GitHub)
-  workflow_dispatch:          # bouton "Run workflow" pour tester à la main
+  workflow_dispatch:
 
 concurrency:
   group: trail-duo-alert
