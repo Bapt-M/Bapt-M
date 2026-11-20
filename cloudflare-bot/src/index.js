@@ -33,7 +33,36 @@ function pageToLines(html) {
     .filter(Boolean);
 }
 
+function parseCount(text) {
+  // « 318 = 159 équipes » -> 159 ; « 318 » -> 159 ; « Complet » -> 0
+  const m = text.match(/(\d+)(?:\s*=\s*(\d+)\s*[ée]quipes?)?/i);
+  if (m) return m[2] ? +m[2] : Math.floor(+m[1] / 2);
+  if (/complet|sold\s*out|liste d'attente/i.test(text)) return 0;
+  return null;
+}
+
 export function findRemaining(html) {
+  // 1) Par les identifiants de la page : ..._ActivityName_6 / ..._AvailableBib_Count_6
+  const nameRe = /id="[^"]*_Label_EventRegistrationActivityName_(\d+)"[^>]*>([^<]*)</g;
+  for (const [, idx, rawName] of html.matchAll(nameRe)) {
+    const name = pageToLines(rawName).join(" ").toLowerCase();
+    if (!RACE_WORDS.every((w) => name.includes(w))) continue;
+    const countRe = new RegExp(`id="[^"]*_Label_AvailableBib_Count_${idx}"[^>]*>([^<]*)<`);
+    const c = html.match(countRe);
+    if (c) {
+      const txt = pageToLines(c[1]).join(" ");
+      const n = parseCount(txt);
+      if (n !== null) return { remaining: n, snippet: `${rawName.trim()} : ${txt}` };
+    }
+    // Plus de compteur affiché : course complète ?
+    const start = html.indexOf(`_ActivityName_${idx}"`);
+    let end = html.indexOf(`_ActivityName_${+idx + 1}"`);
+    if (end < 0) end = start + 6000;
+    const block = html.slice(start, end);
+    if (/complet|sold\s*out|liste d'attente/i.test(block)) return { remaining: 0, snippet: `${rawName.trim()} : complet` };
+  }
+
+  // 2) Repli : recherche dans le texte de la page
   const lines = pageToLines(html);
   for (let i = 0; i < lines.length; i++) {
     const low = lines[i].toLowerCase();
@@ -44,7 +73,7 @@ export function findRemaining(html) {
       if (l.toLowerCase().includes("inscrire")) break;
     }
     const win = block.join(" | ");
-    const m = win.match(/places?\s+disponibles?\s*:\s*(\d+)(?:\s*=\s*(\d+)\s*[ée]quipes?)?/i);
+    const m = win.match(/places?\s+disponibles?\s*:[\s|]*(\d+)(?:\s*=\s*(\d+)\s*[ée]quipes?)?/i);
     if (m) return { remaining: m[2] ? +m[2] : Math.floor(+m[1] / 2), snippet: win };
     if (/\b(complet|sold\s*out|liste d'attente)\b/i.test(win)) return { remaining: 0, snippet: win };
   }
