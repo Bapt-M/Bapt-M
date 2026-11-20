@@ -1,0 +1,92 @@
+# Déploie le bot Telegram sur Cloudflare Workers et branche le webhook /places.
+name: Déployer le bot Cloudflare
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "cloudflare-bot/**"
+      - ".github/workflows/deploy-cloudflare-bot.yml"
+
+concurrency:
+  group: deploy-cloudflare-bot
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: cloudflare-bot
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WRANGLER: npx --yes wrangler@4.20.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Vérifier les secrets
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          missing=0
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID TG_TOKEN TG_CHAT; do
+            if [ -z "${!v}" ]; then echo "::error::Secret manquant : $v"; missing=1; fi
+          done
+          exit $missing
+
+      - name: Créer ou retrouver le stockage KV
+        run: |
+          NAME=trail-cretes-state
+          id=$($WRANGLER kv namespace list | jq -r --arg n "$NAME" '.[] | select(.title==$n) | .id' | head -1)
+          if [ -z "$id" ]; then
+            $WRANGLER kv namespace create "$NAME"
+            id=$($WRANGLER kv namespace list | jq -r --arg n "$NAME" '.[] | select(.title==$n) | .id' | head -1)
+          fi
+          [ -n "$id" ] || { echo "::error::Impossible de créer le KV"; exit 1; }
+          sed -i "s/__KV_ID__/$id/" wrangler.toml
+          echo "KV : $id"
+
+      - name: Déployer le Worker
+        id: deploy
+        run: |
+          $WRANGLER deploy 2>&1 | tee deploy.log
+          url=$(grep -o 'https://[a-zA-Z0-9.-]*\.workers\.dev' deploy.log | head -1)
+          [ -n "$url" ] || { echo "::error::URL workers.dev introuvable (ouvre Workers & Pages une fois dans Cloudflare pour créer ton sous-domaine)"; exit 1; }
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Worker : $url"
+
+      - name: Envoyer les secrets au Worker
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          WH=$(printf '%s' "$TG_TOKEN" | sha256sum | cut -c1-40)
+          echo "::add-mask::$WH"
+          jq -n --arg t "$TG_TOKEN" --arg c "$TG_CHAT" --arg w "$WH" \
+            '{TELEGRAM_BOT_TOKEN:$t, TELEGRAM_CHAT_ID:$c, WEBHOOK_SECRET:$w}' > /tmp/secrets.json
+          $WRANGLER secret bulk /tmp/secrets.json
+          rm /tmp/secrets.json
+
+      - name: Brancher le webhook Telegram
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          WH=$(printf '%s' "$TG_TOKEN" | sha256sum | cut -c1-40)
+          echo "::add-mask::$WH"
+          sleep 5
+          for i in 1 2 3 4 5; do
+            r=$(curl -sS "$URL/setup?key=$WH" || true)
+            echo "$r"
+            echo "$r" | grep -q '"ok":true' && break
+            sleep 10
+          done
+          echo "$r" | grep -q '"ok":true' || { echo "::error::Webhook non branché"; exit 1; }
+          echo "--- Page de contrôle :"
+          curl -sS "$URL/"

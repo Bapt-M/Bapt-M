@@ -1,0 +1,12 @@
+name = "trail-cretes-bot"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+workers_dev = true
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+# L'id est rempli automatiquement par le workflow de déploiement
+[[kv_namespaces]]
+binding = "STATE"
+id = "__KV_ID__"
