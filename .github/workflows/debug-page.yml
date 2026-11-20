@@ -1,0 +1,21 @@
+# Test temporaire : la page contient-elle les places sans navigateur ?
+name: Debug page brute
+on: workflow_dispatch
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -sSL -A "Mozilla/5.0" -o page.html -w "HTTP %{http_code} taille %{size_download}\n" \
+            "https://forms.registration4all.com/EventRegistration/Register_Sport_Event.aspx?EventID=233725&RORG=LSCAL"
+          echo "--- occurrences PLACES DISPONIBLES:"
+          grep -o -i "places disponibles[^<]\{0,60\}" page.html | head -20 || true
+          echo "--- contexte Crêtes DUO:"
+          python3 - <<'PY'
+          import re,html
+          s=open('page.html',encoding='utf-8',errors='replace').read()
+          i=s.lower().find('crêtes 65km en duo')
+          if i<0: i=s.lower().find('cr&#234;tes 65km en duo')
+          print('index', i)
+          if i>=0: print(s[i-200:i+2500])
+          PY
